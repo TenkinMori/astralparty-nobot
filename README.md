@@ -1,91 +1,85 @@
-# 吉星派对 · NoBot（开房不补 Bot）
+# 吉星派对 · NoBot（单文件版）
 
-> 《吉星派对》（Steam：AstralParty）的**独立小插件**。
-> 创建房间后点「开始」直接开局，不再弹「是否补充 Bot」。
->
-> 只改本机补丁包里的两处常量：不碰服务端、不改界面、不改窗口标题。
+> 《吉星派对》（Steam：AstralParty）的客户端小补丁：**一个 `hid.dll`**，放进游戏根目录就生效，删掉就失效。
+> 开房后点「开始」直接开局，不再弹「是否补充 Bot」。
 
 ---
 
-## 功能
+## 特点
 
-| 功能 | 说明 |
+| 特点 | 说明 |
 |---|---|
-| 跳过补 Bot 确认 | 点「开始」直接进入对局，不再询问是否补机器人 |
-| 两个开局按钮统一 | 「补 Bot 开局」和「不补 Bot 开局」都走不补 Bot 分支 |
-| 可随时还原 | 安装脚本自带还原，恢复游戏原样 |
-
----
-
-## 版本与下载
-
-| 版本 | 日期 | 说明 |
-|---|---|---|
-| v1.0 | 2026-10-30 | 首个独立版（hid.dll 代理 + 补丁包） |
-
-- 成品：本仓库 `dist/` 目录，或 **GitHub Releases** 里的 `NoBot-v1.0.zip`
-- 适用：官服客户端 3.3.0（2026-10-30 构建）
+| **单文件** | 只有一个 `hid.dll`（约 8MB，补丁包内嵌） |
+| **不落盘** | 不写游戏目录、不写 Addressables 缓存，退出即清理临时文件 |
+| **删除即卸载** | 删掉 `hid.dll` 就完全恢复原版，不需要还原工具 |
+| **只影响本机** | 不改服务端、不改窗口标题、不改界面 |
 
 ---
 
 ## 安装
 
-**准备工作**：完全退出游戏（任务管理器里确认 `AstralParty_CN.exe` 已结束）。
+1. 完全退出游戏（任务管理器确认 `AstralParty_CN.exe` 已结束）
+2. 把 `dist\hid.dll` 复制到**游戏根目录**（`AstralParty_CN.exe` 所在目录）
+3. 启动游戏 → 创建房间 → 点「开始」→ 直接开局
 
-1. 解压 `NoBot-v1.0.zip`（或本仓库 `dist/`）到**游戏根目录**，即 `AstralParty_CN.exe` 所在目录。
-   解压后应得到：
-
-   ```
-   游戏根目录\
-   ├─ AstralParty_CN.exe
-   ├─ hid.dll
-   ├─ hid_orig.dll
-   ├─ 安装.bat
-   ├─ install.ps1
-   └─ AstralPartyExtra\
-      └─ hotfix__data
-   ```
-
-2. 双击 **`安装.bat`** → 输入 **`1`** 回车（安装）。
-3. 启动游戏 → 创建房间 → 点「开始」→ 直接开局。
-
-> `AstralPartyExtra` 文件夹名是 `hid.dll` 固定要找的路径，**不要改名**。
-
-**验证是否生效**：
-
-- 安装脚本会打印「原版 / 补丁版」的大小和 SHA256
-- 也可以看 `AstralPartyExtra\hotfix__data` 的大小是否变成补丁版（约 7.9MB）
+**卸载**：关闭游戏，删除游戏根目录的 `hid.dll` 即可。
 
 ---
 
-## 还原
+## 验证是否生效
 
-双击 `安装.bat` → 输入 **`2`** 回车（还原）。
+看 `%TEMP%\nobot.log`：
 
-还原会：
+- `hook installed` → 挂钩成功
+- `redirect __data` → 游戏读取热更包时被重定向到补丁版
 
-1. 把补丁包换回原版（备份在 `__data.apa-orig`）
-2. 移除 `hid.dll`（保留 `hid_orig.dll`）
-
-> 只删 `hid.dll` 不够——安装时补丁已写进游戏缓存，必须用还原功能一起处理。
+如果日志里是 `no payload footer` 或 `hook failed`，说明文件不完整或环境不符。
 
 ---
 
 ## 原理
 
-只改补丁包里的两个常量：
+1. `UnityPlayer.dll` 静态导入 `HID.DLL`，Windows 按「exe 所在目录优先」解析，所以根目录的 `hid.dll` 会被加载。
+2. 本 DLL 把系统 `hid.dll` 的 **47 个导出**全部转发给 `C:\Windows\System32\hid.dll`（自己 `LoadLibrary` 绝对路径，不需要 `hid_orig.dll`）。
+3. 启动时把**内嵌的补丁 bundle** 释放到 `%TEMP%\nobot-<pid>\__data`。
+4. 用 MinHook 挂钩 `kernel32!CreateFileW`：当游戏**只读**打开 Addressables 里那颗**原版热更 `__data`**（按文件大小 `8,339,710` 识别）时，改成打开临时补丁文件。
+5. 进程退出时删除临时文件。
 
+> 因为补丁只在进程内生效，游戏缓存里始终是原版——删 DLL 就彻底失效。
+
+---
+
+## 兼容性
+
+- 面向**官服 3.3.0 原版客户端**（原版热更包 = `8,339,710` 字节）
+- 游戏更新后热更包大小会变，需要重新构建（见下）
+- 仅 Windows x64
+
+---
+
+## 构建
+
+依赖：
+
+| 组件 | 要求 |
+|---|---|
+| Visual Studio 2022 | `cl.exe` / `ml64.exe`（C++ 桌面开发） |
+| Python | 3.13（跑 `gen.py` 生成导出表/跳转 thunk） |
+| MinHook | 已内置 `single/minhook` |
+
+```powershell
+powershell -NoProfile -File single\build.ps1 -Test
 ```
-UI.RoomWaitPanel.<RequsetStart>b__16_0   ldc.i4.1 → ldc.i4.0
-UI.RoomWaitPanel.<RequsetStart>b__16_1   ldc.i4.1 → ldc.i4.0
-```
 
-这两个分别是「补 Bot 开局」和「不补 Bot 开局」两个按钮的处理函数。
-把 `true` 改成 `false` 后，两个按钮都走「不补 Bot」分支。
+- 产物：`single\hid.dll`（未追加补丁前的 DLL 约 120KB，追加后约 8.4MB）
+- `-Test` 会同时编译 `test.exe` 做本地重定向自测
+- 默认补丁取自 `dist\hid.dll` 尾部内嵌数据；也可用 `-Payload <hotfix__data>` 指定新补丁
 
-**加载方式**：`hid.dll` 是代理 DLL，`UnityPlayer.dll` 会优先加载它。
-它在启动时把 `AstralPartyExtra\hotfix__data` 写进游戏的 Addressables 缓存，
-其余 HID 导出原样转发给 `hid_orig.dll`，所以不影响手柄/键鼠。
+**游戏更新后**：
+
+1. 用新客户端重新打补丁包（`legacy\` 里的旧脚本或 PatchManager）
+2. 改 `single\nobot.c` 里的 `g_targetSize`（新原版热更包大小）
+3. 重新构建，覆盖 `dist\hid.dll`
 
 ---
 
@@ -93,36 +87,10 @@ UI.RoomWaitPanel.<RequsetStart>b__16_1   ldc.i4.1 → ldc.i4.0
 
 ```
 astralparty-nobot\
-├─ src\      探针源码（Probe.cs：扫描程序集定位两处调用点）
-├─ build\    构建与安装脚本（build.py / pack_bundle.py / install-nobot.ps1 / 启动.bat）
-└─ dist\     ★ 可直接分发的成品（hid.dll / hid_orig.dll / hotfix__data / 安装.bat / install.ps1）
+├─ dist\hid.dll      ★ 成品（直接复制到游戏根目录）
+├─ single\           单文件版源码（nobot.c / thunks.asm / exports.def / gen.py / build.ps1 / minhook）
+└─ legacy\           旧多文件版（hid_orig.dll + 补丁包 + 安装脚本，已不推荐）
 ```
-
----
-
-## 从源码构建
-
-**依赖**
-
-| 组件 | 要求 |
-|---|---|
-| 系统 | Windows 10 / 11 x64 |
-| .NET SDK | 9.0（编译探针 Probe） |
-| Python | 3.13 |
-| 参考 DLL | `AstralParty.Runtime.dll`（从游戏客户端取，或用现成的 `work\live_refs`） |
-| 打补丁工具 | `dllpatch`（见 `build\build.py` 顶部路径常量） |
-
-**步骤**
-
-```powershell
-# 1) 探针扫描参考 DLL，定位 RequestStartGameC2S 的调用点
-python build\build.py
-
-# 2) 打补丁包（内部调用 dllpatch）
-python build\build.py --out dist\AstralPartyExtra\hotfix__data
-```
-
-> 游戏更新后必须重新执行：常量位置可能变化，旧补丁包会失效。
 
 ---
 
@@ -130,28 +98,11 @@ python build\build.py --out dist\AstralPartyExtra\hotfix__data
 
 | 现象 | 处理 |
 |---|---|
-| 装了没效果，还是弹「补充 Bot」 | ① 确认游戏完全退出后再装；② 装完看 `hotfix__data` 大小是否变化；③ 菜单选 3 查看状态 |
-| 游戏起不来 / 闪退 | 双击 `安装.bat` 选 2 还原；确认 `hid_orig.dll` 和 `hid.dll` 在同一目录 |
-| 游戏更新后失效 | 补丁包会失效，需要重新构建（见上一节） |
-| 和其他插件冲突 | 不要同时装两个都改补丁包的插件；要合并请用统一的补丁管理器 |
-| 杀毒软件报毒 | `hid.dll` 是代理注入类文件，可能被误报；可加白名单 |
-| 想确认装的是哪版 | 看 `AstralPartyExtra\hotfix__data` 大小 / SHA256，或运行安装脚本看状态 |
-
----
-
-## 兼容性
-
-- 只支持 Windows 官服客户端（Steam / 官方启动器）
-- 当前补丁基于 **3.3.0** 客户端构建，其他版本可能无效
-- 只影响本机表现，服务端与房间逻辑不变
-
----
-
-## 更新日志
-
-| 日期 | 版本 | 内容 |
-|---|---|---|
-| 2026-10-30 | v1.0 | 首个独立版：hid.dll 代理 + 补丁包 + 安装/还原脚本 |
+| 装了没效果 | 看 `%TEMP%\nobot.log`；确认游戏是 3.3.0 原版、`hid.dll` 在根目录 |
+| 游戏起不来 / 闪退 | 删除 `hid.dll`；确认系统是 x64 |
+| 游戏更新后失效 | 热更包大小变了，按「构建」重新生成 |
+| 杀毒软件报毒 | 注入类 DLL 常被误报，可加白名单 |
+| 和其他 mod 冲突 | 若其他 mod 直接替换热更包文件，本 DLL 的重定向会覆盖它的读取；二选一 |
 
 ---
 

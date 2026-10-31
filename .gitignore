@@ -1,11 +1,11 @@
-# 构建中间产物
-bin/
-obj/
-**/bin/
-**/obj/
-out/
-__pycache__/
-*.pyc
+# 构建中间产物（single/ 下由 build.ps1 生成）
+*.obj
+*.lib
+*.exp
+*.pdb
+*.ilk
+single/hid.dll
+single/test.exe
 
 # 日志 / 临时 / 压缩包
 *.log
@@ -14,4 +14,4 @@ __pycache__/
 *.7z
 *.bak*
 
-# 注意：dist\ 里的 .dll 与 hotfix__data 是成品，必须保留，不要忽略
+# 注意：dist/hid.dll 是成品，必须保留

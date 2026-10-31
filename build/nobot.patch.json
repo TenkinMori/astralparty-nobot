@@ -1,6 +1,0 @@
-{
-  "ConstSwaps": [
-    { "Type": "UI.RoomWaitPanel", "Method": "<RequsetStart>b__16_0", "From": 1, "To": 0, "Occurrence": 0 },
-    { "Type": "UI.RoomWaitPanel", "Method": "<RequsetStart>b__16_1", "From": 1, "To": 0, "Occurrence": 0 }
-  ]
-}
