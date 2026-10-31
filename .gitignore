@@ -1,0 +1,17 @@
+# 构建中间产物
+bin/
+obj/
+**/bin/
+**/obj/
+out/
+__pycache__/
+*.pyc
+
+# 日志 / 临时 / 压缩包
+*.log
+*.tmp
+*.zip
+*.7z
+*.bak*
+
+# 注意：dist\ 里的 .dll 与 hotfix__data 是成品，必须保留，不要忽略
