@@ -11,7 +11,7 @@
 | 形态 | 位置 | 说明 |
 |---|---|---|
 | **独立版**（本仓库 `dist/`） | 丢 `hid.dll` 进游戏目录 | 不依赖 PatchManager / CesiumLoader，装完即用 |
-| CesiumLoader mod 版 | APA 仓库 `src/nobot` | 需要先装 CesiumLoader（第三方 ModLoader） |
+| CesiumLoader mod 版 | —（暂时不可用） | 已在 2026-10-31 从 APA 仓库移除，等加载器可用再恢复 |
 
 两者**不要同时装**，装一个即可。
 
