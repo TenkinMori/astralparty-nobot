@@ -1,4 +1,4 @@
-﻿# 吉星派对 · NoBot
+# 吉星派对 · NoBot
 
 > 《吉星派对》（Steam：AstralParty）的客户端小补丁：**一个 `hid.dll`**，放进游戏根目录就生效，删掉就失效。
 > 开房后点「开始」直接开局，不再弹「是否补充 Bot」。
@@ -77,7 +77,7 @@ powershell -NoProfile -File single\build.ps1 -Test
 
 **游戏更新后**：
 
-1. 用新客户端重新打补丁包（`legacy\` 里的旧脚本或 PatchManager）
+1. 用新客户端重新打补丁包（PatchManager 或 dllpatch）
 2. 改 `single\nobot.c` 里的 `g_targetSize`（新原版热更包大小）
 3. 重新构建，覆盖 `dist\hid.dll`
 
@@ -88,8 +88,7 @@ powershell -NoProfile -File single\build.ps1 -Test
 ```
 astralparty-nobot\
 ├─ dist\hid.dll      ★ 成品（直接复制到游戏根目录）
-├─ single\           源码（nobot.c / thunks.asm / exports.def / gen.py / build.ps1 / minhook）
-└─ legacy\           旧多文件版（hid_orig.dll + 补丁包 + 安装脚本，已不推荐）
+└─ single\           源码（nobot.c / thunks.asm / exports.def / gen.py / build.ps1 / minhook）
 ```
 
 ---
