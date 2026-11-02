@@ -1,18 +1,19 @@
-﻿// ============================================================================
-//  NoBot 单文件版  ——  hid.dll
+// ============================================================================
+//  NoBot 多版本版  ——  hid.dll
 //
-//  工作原理：
-//    1. UnityPlayer.dll 静态导入 HID.DLL，Windows 按「exe 所在目录优先」解析，
-//       所以游戏目录里放一个 hid.dll 就会被加载；
-//    2. 本 DLL 把系统 hid.dll 的 47 个导出全部转发（自己 LoadLibrary 系统绝对路径，
-//       不再需要 hid_orig.dll）；
-//    3. 启动后把内嵌的补丁 bundle 释放到 %TEMP%\nobot-<pid>\__data，
-//       并用 MinHook 挂钩 kernel32!CreateFileW：
-//         当游戏去读 Addressables 里那颗「原版热更 __data」时（按文件大小识别），
-//         实际返回临时补丁文件的句柄。
-//    4. 不写游戏目录、不写 Addressables 缓存；删掉 hid.dll 就完全失效。
+//  工作原理（与单版本版一致，只是支持多份 payload）：
+//    1. UnityPlayer.dll 静态导入 HID.DLL，Windows 按「exe 所在目录优先」解析；
+//    2. 本 DLL 把系统 hid.dll 的 47 个导出全部转发；
+//    3. 启动后解析文件尾部 footer：
+//         NBP1: magic + off + len                       （单 payload，兼容旧版）
+//         NBP2: magic + count + (size, off, len)*count  （多 payload）
+//       把每个 payload 释放到 %TEMP%\nobot-<pid>\<size>；
+//    4. MinHook 挂钩 kernel32!CreateFileW，游戏只读打开
+//       "com.unity.addressables\...\__data" 时，按文件大小匹配目标表，
+//       命中就改成打开对应 payload 的临时文件；
+//    5. 进程退出时删除临时文件。
 //
-//  构建：build.ps1（cl + ml64 + MinHook），产物尾部追加补丁数据（NBP1 footer）。
+//  构建：build.ps1（cl + ml64 + MinHook），产物尾部用 tools/make_nobot.py 追加 payload。
 // ============================================================================
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -23,65 +24,38 @@
 #include "minhook/include/MinHook.h"
 
 #define EXPORT_COUNT 47
-// 内嵌顺序必须与 thunks.asm / exports.def 完全一致（由 gen.py 生成）
+#define MAX_TARGETS 8
+
 void* g_targets[EXPORT_COUNT] = { 0 };
 
 static const char* g_names[EXPORT_COUNT] = {
-    "HidD_FlushQueue",
-    "HidD_FreePreparsedData",
-    "HidD_GetAttributes",
-    "HidD_GetConfiguration",
-    "HidD_GetFeature",
-    "HidD_GetHidGuid",
-    "HidD_GetIndexedString",
-    "HidD_GetInputReport",
-    "HidD_GetManufacturerString",
-    "HidD_GetMsGenreDescriptor",
-    "HidD_GetNumInputBuffers",
-    "HidD_GetPhysicalDescriptor",
-    "HidD_GetPreparsedData",
-    "HidD_GetProductString",
-    "HidD_GetSerialNumberString",
-    "HidD_Hello",
-    "HidD_SetConfiguration",
-    "HidD_SetFeature",
-    "HidD_SetNumInputBuffers",
-    "HidD_SetOutputReport",
-    "HidP_GetButtonArray",
-    "HidP_GetButtonCaps",
-    "HidP_GetCaps",
-    "HidP_GetData",
-    "HidP_GetExtendedAttributes",
-    "HidP_GetLinkCollectionNodes",
-    "HidP_GetScaledUsageValue",
-    "HidP_GetSpecificButtonCaps",
-    "HidP_GetSpecificValueCaps",
-    "HidP_GetUsages",
-    "HidP_GetUsagesEx",
-    "HidP_GetUsageValue",
-    "HidP_GetUsageValueArray",
-    "HidP_GetValueCaps",
-    "HidP_GetVersionInternal",
-    "HidP_InitializeReportForID",
-    "HidP_MaxDataListLength",
-    "HidP_MaxUsageListLength",
-    "HidP_SetButtonArray",
-    "HidP_SetData",
-    "HidP_SetScaledUsageValue",
-    "HidP_SetUsages",
-    "HidP_SetUsageValue",
-    "HidP_SetUsageValueArray",
-    "HidP_TranslateUsagesToI8042ScanCodes",
-    "HidP_UnsetUsages",
-    "HidP_UsageListDifference",
+    "HidD_FlushQueue", "HidD_FreePreparsedData", "HidD_GetAttributes", "HidD_GetConfiguration",
+    "HidD_GetFeature", "HidD_GetHidGuid", "HidD_GetIndexedString", "HidD_GetInputReport",
+    "HidD_GetManufacturerString", "HidD_GetMsGenreDescriptor", "HidD_GetNumInputBuffers",
+    "HidD_GetPhysicalDescriptor", "HidD_GetPreparsedData", "HidD_GetProductString",
+    "HidD_GetSerialNumberString", "HidD_Hello", "HidD_SetConfiguration", "HidD_SetFeature",
+    "HidD_SetNumInputBuffers", "HidD_SetOutputReport", "HidP_GetButtonArray", "HidP_GetButtonCaps",
+    "HidP_GetCaps", "HidP_GetData", "HidP_GetExtendedAttributes", "HidP_GetLinkCollectionNodes",
+    "HidP_GetScaledUsageValue", "HidP_GetSpecificButtonCaps", "HidP_GetSpecificValueCaps",
+    "HidP_GetUsages", "HidP_GetUsagesEx", "HidP_GetUsageValue", "HidP_GetUsageValueArray",
+    "HidP_GetValueCaps", "HidP_GetVersionInternal", "HidP_InitializeReportForID",
+    "HidP_MaxDataListLength", "HidP_MaxUsageListLength", "HidP_SetButtonArray", "HidP_SetData",
+    "HidP_SetScaledUsageValue", "HidP_SetUsages", "HidP_SetUsageValue", "HidP_SetUsageValueArray",
+    "HidP_TranslateUsagesToI8042ScanCodes", "HidP_UnsetUsages", "HidP_UsageListDifference",
 };
 
-// 原版热更包大小（3.3.0，2026-10-30）；换版本后要重新对
-static unsigned long long g_targetSize = 8339710ULL;
+typedef struct {
+    unsigned long long size;
+    wchar_t path[MAX_PATH * 2];
+} TargetEntry;
+
+static TargetEntry g_tbl[MAX_TARGETS];
+static int g_tblCount = 0;
+
+static unsigned long long g_targetSize = 0;   // 兼容旧环境变量 NOBOT_TARGET_SIZE
 static HMODULE  g_self = NULL;
-static wchar_t  g_tempPath[MAX_PATH * 2] = { 0 };
-static wchar_t  g_tempDir[MAX_PATH * 2]  = { 0 };
-static char     g_logPath[MAX_PATH * 2]  = { 0 };
+static wchar_t  g_tempDir[MAX_PATH * 2] = { 0 };
+static char     g_logPath[MAX_PATH * 2] = { 0 };
 static volatile LONG g_hooked = 0;
 static volatile LONG g_off = 0;
 
@@ -137,19 +111,56 @@ static void init_paths(void)
     WideCharToMultiByte(CP_UTF8, 0, logW, -1, g_logPath, sizeof(g_logPath), NULL, NULL);
 }
 
-static int build_temp_path(void)
+static int build_temp_dir(void)
 {
     wchar_t tmp[MAX_PATH * 2];
     DWORD m = GetTempPathW(MAX_PATH * 2, tmp);
     if (m == 0) return 0;
     wsprintfW(g_tempDir, L"%snobot-%lu", tmp, (unsigned long)GetCurrentProcessId());
     CreateDirectoryW(g_tempDir, NULL);
-    wsprintfW(g_tempPath, L"%s\\__data", g_tempDir);
     return 1;
 }
 
-// ------------------------------------------------------------------ 释放内嵌补丁
-static int extract_payload(void)
+static void entry_path(int i, unsigned long long size)
+{
+    wsprintfW(g_tbl[i].path, L"%s\\%I64u.__data", g_tempDir, size);
+    g_tbl[i].size = size;
+}
+
+// ------------------------------------------------------------------ 释放内嵌 payload
+static int copy_range(HANDLE in, HANDLE out, unsigned long long off, unsigned long long len)
+{
+    LARGE_INTEGER pos;
+    pos.QuadPart = (LONGLONG)off;
+    if (!SetFilePointerEx(in, pos, NULL, FILE_BEGIN)) return 0;
+
+    static unsigned char buf[1 << 20];
+    unsigned long long left = len;
+    while (left > 0) {
+        DWORD want = (left > sizeof(buf)) ? (DWORD)sizeof(buf) : (DWORD)left;
+        DWORD got = 0, wrote = 0;
+        if (!ReadFile(in, buf, want, &got, NULL) || got == 0) return 0;
+        if (!WriteFile(out, buf, got, &wrote, NULL) || wrote != got) return 0;
+        left -= got;
+    }
+    return 1;
+}
+
+static int extract_one(HANDLE in, unsigned long long size, unsigned long long off, unsigned long long len)
+{
+    if (g_tblCount >= MAX_TARGETS) return 0;
+    int i = g_tblCount;
+    entry_path(i, size);
+    HANDLE out = CreateFileW(g_tbl[i].path, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (out == INVALID_HANDLE_VALUE) return 0;
+    int ok = copy_range(in, out, off, len);
+    CloseHandle(out);
+    if (!ok) return 0;
+    g_tblCount++;
+    return 1;
+}
+
+static int extract_payloads(void)
 {
     wchar_t self[MAX_PATH * 2];
     DWORD n = GetModuleFileNameW(g_self, self, MAX_PATH * 2);
@@ -161,43 +172,64 @@ static int extract_payload(void)
     LARGE_INTEGER sz;
     if (!GetFileSizeEx(in, &sz) || sz.QuadPart < 32) { CloseHandle(in); logmsg("self too small"); return 0; }
 
+    if (!build_temp_dir()) { CloseHandle(in); return 0; }
+
     unsigned char footer[20];
     LARGE_INTEGER pos;
     pos.QuadPart = sz.QuadPart - 20;
     if (!SetFilePointerEx(in, pos, NULL, FILE_BEGIN)) { CloseHandle(in); return 0; }
     DWORD rd = 0;
-    if (!ReadFile(in, footer, 20, &rd, NULL) || rd != 20 || memcmp(footer, "NBP1", 4) != 0) {
-        CloseHandle(in); logmsg("no payload footer"); return 0;
+    if (!ReadFile(in, footer, 20, &rd, NULL) || rd != 20) { CloseHandle(in); return 0; }
+
+    if (memcmp(footer, "NBP1", 4) == 0) {
+        unsigned long long off = 0, len = 0;
+        memcpy(&off, footer + 4, 8);
+        memcpy(&len, footer + 12, 8);
+        if (off < 20 || len == 0 || off + len > (unsigned long long)sz.QuadPart) {
+            CloseHandle(in); logmsg("bad payload range"); return 0;
+        }
+        unsigned long long size = g_targetSize ? g_targetSize : 8339710ULL;
+        if (!extract_one(in, size, off, len)) { CloseHandle(in); logmsg("payload copy failed"); return 0; }
+        CloseHandle(in);
+        logmsg("payload extracted (NBP1)");
+        return 1;
     }
-    unsigned long long off = 0, len = 0;
-    memcpy(&off, footer + 4, 8);
-    memcpy(&len, footer + 12, 8);
-    if (off < 20 || len == 0 || off + len > (unsigned long long)sz.QuadPart) {
-        CloseHandle(in); logmsg("bad payload range"); return 0;
+
+    if (memcmp(footer, "NBP2", 4) == 0) {
+        // footer 尾部 20 字节: "NBP2" + count + off + len（表在 len 处）
+        unsigned int count = 0;
+        unsigned long long tblOff = 0, tblLen = 0;
+        memcpy(&count, footer + 4, 4);
+        memcpy(&tblOff, footer + 8, 8);
+        memcpy(&tblLen, footer + 16, 4);
+        if (count == 0 || count > MAX_TARGETS || tblLen != count * 24ULL
+            || tblOff + tblLen > (unsigned long long)sz.QuadPart) {
+            CloseHandle(in); logmsg("bad NBP2 table"); return 0;
+        }
+        unsigned char tbl[24 * MAX_TARGETS];
+        pos.QuadPart = (LONGLONG)tblOff;
+        if (!SetFilePointerEx(in, pos, NULL, FILE_BEGIN)) { CloseHandle(in); return 0; }
+        if (!ReadFile(in, tbl, (DWORD)tblLen, &rd, NULL) || rd != (DWORD)tblLen) { CloseHandle(in); return 0; }
+
+        int okAll = 0;
+        for (unsigned int k = 0; k < count; ++k) {
+            unsigned long long size = 0, off = 0, len = 0;
+            memcpy(&size, tbl + k * 24, 8);
+            memcpy(&off, tbl + k * 24 + 8, 8);
+            memcpy(&len, tbl + k * 24 + 16, 8);
+            if (len == 0 || off + len > (unsigned long long)sz.QuadPart) continue;
+            if (extract_one(in, size, off, len)) okAll++;
+        }
+        CloseHandle(in);
+        char msg[64];
+        wsprintfA(msg, "payload extracted (NBP2): %d", okAll);
+        logmsg(msg);
+        return okAll > 0;
     }
 
-    if (!build_temp_path()) { CloseHandle(in); return 0; }
-
-    HANDLE out = CreateFileW(g_tempPath, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
-    if (out == INVALID_HANDLE_VALUE) { CloseHandle(in); logmsg("create temp failed"); return 0; }
-
-    pos.QuadPart = (LONGLONG)off;
-    SetFilePointerEx(in, pos, NULL, FILE_BEGIN);
-
-    static unsigned char buf[1 << 20];
-    unsigned long long left = len;
-    while (left > 0) {
-        DWORD want = (left > sizeof(buf)) ? (DWORD)sizeof(buf) : (DWORD)left;
-        DWORD got = 0, wrote = 0;
-        if (!ReadFile(in, buf, want, &got, NULL) || got == 0) break;
-        if (!WriteFile(out, buf, got, &wrote, NULL) || wrote != got) break;
-        left -= got;
-    }
-    CloseHandle(out);
     CloseHandle(in);
-    if (left != 0) { logmsg("payload copy short"); return 0; }
-    logmsg("payload extracted");
-    return 1;
+    logmsg("no payload footer");
+    return 0;
 }
 
 // ------------------------------------------------------------------ 系统 hid.dll 转发
@@ -219,29 +251,40 @@ static void load_system_hid(void)
     logmsg(msg);
 }
 
-// ------------------------------------------------------------------ 挂钩
-static int should_redirect(LPCWSTR path, DWORD access, DWORD disp)
+// ------------------------------------------------------------------ 拦截
+static const wchar_t* match_target(unsigned long long size)
 {
-    if (!path || !path[0] || !g_tempPath[0]) return 0;
-    if (access & (GENERIC_WRITE | GENERIC_ALL)) return 0;   // 只拦只读打开
-    if (disp != OPEN_EXISTING) return 0;                   // 只拦已存在的文件
-    if (starts_with_ci(path, g_tempDir)) return 0;              // 别拦自己
-    if (!contains_ci(path, L"com.unity.addressables")) return 0;
-    if (!contains_ci(path, L"__data")) return 0;
+    for (int i = 0; i < g_tblCount; ++i) {
+        if (g_tbl[i].size == size) return g_tbl[i].path;
+    }
+    return NULL;
+}
+
+static const wchar_t* should_redirect(LPCWSTR path, DWORD access, DWORD disp)
+{
+    if (!path || !path[0] || g_tblCount == 0) return NULL;
+    if (access & (GENERIC_WRITE | GENERIC_ALL)) return NULL;
+    if (disp != OPEN_EXISTING) return NULL;
+    if (starts_with_ci(path, g_tempDir)) return NULL;
+    if (!contains_ci(path, L"com.unity.addressables")) return NULL;
+    if (!contains_ci(path, L"__data")) return NULL;
 
     WIN32_FILE_ATTRIBUTE_DATA fad;
-    if (!GetFileAttributesExW(path, GetFileExInfoStandard, &fad)) return 0;
+    if (!GetFileAttributesExW(path, GetFileExInfoStandard, &fad)) return NULL;
     unsigned long long size = ((unsigned long long)fad.nFileSizeHigh << 32) | fad.nFileSizeLow;
-    return size == g_targetSize;
+    return match_target(size);
 }
 
 static HANDLE WINAPI hook_CreateFileW(LPCWSTR path, DWORD access, DWORD share,
                                       LPSECURITY_ATTRIBUTES sa, DWORD disp,
                                       DWORD flags, HANDLE tmpl)
 {
-    if (g_hooked && should_redirect(path, access, disp)) {
-        logmsg("redirect __data");
-        return g_realCreateFileW(g_tempPath, access, share, sa, disp, flags, tmpl);
+    if (g_hooked) {
+        const wchar_t* repl = should_redirect(path, access, disp);
+        if (repl) {
+            logmsg("redirect __data");
+            return g_realCreateFileW(repl, access, share, sa, disp, flags, tmpl);
+        }
     }
     return g_realCreateFileW(path, access, share, sa, disp, flags, tmpl);
 }
@@ -264,7 +307,7 @@ static DWORD WINAPI init_thread(LPVOID param)
         }
     }
 
-    if (!extract_payload()) { logmsg("init: extract failed"); return 0; }
+    if (!extract_payloads()) { logmsg("init: extract failed"); return 0; }
 
     if (MH_Initialize() != MH_OK) { logmsg("MinHook init failed"); return 0; }
     HMODULE k32 = GetModuleHandleW(L"kernel32.dll");
@@ -288,7 +331,7 @@ BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, LPVOID reserved)
         g_self = inst;
         DisableThreadLibraryCalls(inst);
         init_paths();
-        load_system_hid();          // 先转发好，避免游戏早期调用 HID
+        load_system_hid();
         HANDLE t = CreateThread(NULL, 0, init_thread, NULL, 0, NULL);
         if (t) CloseHandle(t);
     } else if (reason == DLL_PROCESS_DETACH) {
@@ -296,10 +339,10 @@ BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, LPVOID reserved)
             MH_DisableHook(MH_ALL_HOOKS);
             MH_Uninitialize();
         }
-        if (g_tempPath[0]) {
-            DeleteFileW(g_tempPath);
-            RemoveDirectoryW(g_tempDir);
+        for (int i = 0; i < g_tblCount; ++i) {
+            if (g_tbl[i].path[0]) DeleteFileW(g_tbl[i].path);
         }
+        if (g_tempDir[0]) RemoveDirectoryW(g_tempDir);
     }
     return TRUE;
 }
