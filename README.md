@@ -49,6 +49,26 @@
 
 ---
 
+## 多版本 / 多服
+
+`tools/make_nobot.py` 可以给任意版本的客户端生成对应的 `hid.dll`，不需要重新编译 C 代码：
+
+```powershell
+python tools\make_nobot.py --stub dist\hid.dll `
+    --payload payload_cn.bin --target-size 8300784 --out dist_cn\hid.dll
+```
+
+- `--stub`：现有的 nobot hid.dll（会自动截掉旧 payload）
+- `--payload`：用 PatchManager 的 `patches/nobot.json` 对**该版本原版 `__data`** 打出来的补丁包
+- `--target-size`：该客户端原版 `__data` 的字节数
+
+已生成的版本：
+
+| 客户端 | 原版 `__data` 大小 | payload |
+|---|---|---|
+| 国服 | 8,300,784 | `payload_cn_8300784.bin` |
+| 国际服 | 8,276,448 | `payload_int_8276448.bin` |
+
 ## 兼容性
 
 - 面向**官服 3.3.0 原版客户端**（原版热更包 = `8,339,710` 字节）
