@@ -15,3 +15,6 @@ single/test.exe
 *.bak*
 
 # 娉ㄦ剰锛歞ist/hid.dll 鏄垚鍝侊紝蹇呴』淇濈暀
+
+# 工具生成的中间 DLL / payload
+work/

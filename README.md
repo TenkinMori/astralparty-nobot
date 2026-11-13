@@ -1,4 +1,4 @@
-﻿# 吉星派对 · NoBot
+# 吉星派对 · NoBot
 
 > 《吉星派对》（Steam：AstralParty）的客户端小补丁：**一个 `hid.dll`**，放进游戏根目录就生效，删掉就失效。
 > 开房后点「开始」直接开局，不再弹「是否补充 Bot」。
@@ -77,6 +77,32 @@ python tools\make_nobot.py --stub dist\hid.dll `
 - 国服热更包 `8,300,784` → `8,405,676`（2026-11-12），旧版 hid.dll 对新客户端不再生效
 - 游戏更新后热更包大小会变，需要按版本重新生成 payload（见下）
 - 仅 Windows x64
+
+---
+
+## 自动识别工具（推荐）
+
+游戏更新后不用再手算热更包大小：
+
+```powershell
+python tools\nobot_tool.py --install
+```
+
+或者把游戏文件夹拖到仓库根目录的 `一键生成NoBot.bat` 上。
+
+它会自动：
+
+1. 找游戏目录（`--game` / 常见 Steam 路径 / steamapps 扫描）
+2. 在 Addressables 缓存里按**内容**找当前热更 `__data`（含 TextAsset `AstralParty.Runtime.dll` 的那颗，不认路径）
+3. 读出它的字节大小 —— 这就是 `hid.dll` 要匹配的目标
+4. 抽出 18 个热更 DLL，用内置的 `tools\dllpatch` + `tools\nobot_patch.json` 打两处常量补丁
+5. 换回 bundle 得到 payload
+6. 重建 `dist\hid.dll`（保留其它服务器的 payload，替换同尺寸那份；NBP2）
+7. `--install` 装进游戏根目录，旧 `hid.dll` 自动备份成 `hid.dll.bak-<时间>`
+
+其它参数：`--out <路径>`、`--no-patch`（只按检测到的尺寸重建）、`--keep-all`（保留 stub 里全部旧 payload）。
+
+依赖：Python 3.9+、UnityPy、.NET 9 运行时（`tools\dllpatch` 内置，约 0.6 MB）。
 
 ---
 
