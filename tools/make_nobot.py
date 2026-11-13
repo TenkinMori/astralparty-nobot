@@ -35,7 +35,14 @@ def main():
             raw = raw[:struct.unpack("<Q", raw[-16:-8])[0]]
             print("已有 NBP1 payload，截断为 %d 字节" % len(raw))
         elif magic == b"NBP2":
-            raw = raw[:struct.unpack("<Q", raw[-12:-4])[0]]
+            # footer = magic + <I count> + <Q 表偏移> + <I 表长度>
+            # 截断点要用「第一份 payload 的偏移」，不能用表偏移（表在最后，
+            # 用表偏移截断会把旧 payload 全留下来，越滚越大）。
+            cnt = struct.unpack("<I", raw[-16:-12])[0]
+            toff = struct.unpack("<Q", raw[-12:-4])[0]
+            offs = [struct.unpack("<Q", raw[toff + 24 * i + 8:toff + 24 * i + 16])[0]
+                    for i in range(cnt)]
+            raw = raw[:min(offs)] if offs else raw[:toff]
             print("已有 NBP2 payload，截断为 %d 字节" % len(raw))
 
     items = []
