@@ -262,7 +262,7 @@ def main(argv=None):
     print("[*] 热更包:", stock)
     print("[*] 目标尺寸:", size)
 
-    stub = args.stub if os.path.isfile(args.stub) else os.path.join(ROOT, "single", "hid.dll")
+    stub = args.stub if os.path.isfile(args.stub) else (os.path.join(ROOT, "single", "hid.dll") if os.path.isfile(os.path.join(ROOT, "single", "hid.dll")) else os.path.join(ROOT, "stub", "hid.dll"))
     stub_bytes = open(stub, "rb").read()
     old = parse_nbp(stub_bytes)
     stub_base = strip_nbp(stub_bytes)

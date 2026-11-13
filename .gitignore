@@ -18,3 +18,5 @@ single/test.exe
 
 # 工具生成的中间 DLL / payload
 work/
+
+__pycache__/
